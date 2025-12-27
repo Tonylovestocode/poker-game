@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Texas Hold'em Poker Simulator</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@400;500;700&display=swap');
+        
+        * { font-family: 'DM Sans', sans-serif; }
+        h1, h2, h3 { font-family: 'Playfair Display', serif; }
+        
+        @keyframes dealCard {
+            from {
+                transform: translateY(-100px) rotate(-10deg);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0) rotate(0deg);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes chipPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        .card-enter {
+            animation: dealCard 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        
+        .chip-stack {
+            animation: chipPulse 2s infinite;
+        }
+        
+        .felt-texture {
+            background-image: 
+                radial-gradient(circle at 20% 30%, rgba(16, 185, 129, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 70%, rgba(20, 184, 166, 0.3) 0%, transparent 50%);
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Lucide icon components (simplified)
+        const Spade = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2c-1.5 4-4 6-7 7 1 1 2 3 2 5H7c0-1.5-1.5-2.5-2-3 3-1 5-3 7-7 2 4 4 6 7 7-.5.5-2 1.5-2 3h-2c0-2 1-4 2-5-3-1-5.5-3-7-7z"/>
+            </svg>
+        );
+
+        const Heart = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+            </svg>
+        );
+
+        const Diamond = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2L2 12l10 10 10-10L12 2z"/>
+            </svg>
+        );
+
+        const Club = ({ className }) => (
+            <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2a4 4 0 0 0-4 4c0 1.5.8 2.8 2 3.5C8.8 10.2 8 11.5 8 13a4 4 0 0 0 4 4c.6 0 1.2-.1 1.7-.4L13 20h-2v2h6v-2h-2l-.7-3.4c.5.3 1.1.4 1.7.4a4 4 0 0 0 4-4c0-1.5-.8-2.8-2-3.5 1.2-.7 2-2 2-3.5a4 4 0 0 0-4-4c-1.5 0-2.8.8-3.5 2-.7-1.2-2-2-3.5-2z"/>
+            </svg>
+        );
+
+        function PokerGame() {
+            const [deck, setDeck] = useState([]);
+            const [playerHand, setPlayerHand] = useState([]);
+            const [communityCards, setCommunityCards] = useState([]);
+            const [opponentHands, setOpponentHands] = useState([[], [], []]);
+            const [gamePhase, setGamePhase] = useState('preflop');
+            const [pot, setPot] = useState(0);
+            const [playerChips, setPlayerChips] = useState(1000);
+            const [opponentChips, setOpponentChips] = useState([1000, 1000, 1000]);
+            const [currentBet, setCurrentBet] = useState(0);
+            const [playerBet, setPlayerBet] = useState(0);
+            const [winner, setWinner] = useState(null);
+            const [handResult, setHandResult] = useState(null);
+            const [isAnimating, setIsAnimating] = useState(false);
+
+            const suits = ['♠', '♥', '♦', '♣'];
+            const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+
+            const getSuitIcon = (suit) => {
+                switch(suit) {
+                    case '♠': return <Spade className="w-5 h-5" />;
+                    case '♥': return <Heart className="w-5 h-5" />;
+                    case '♦': return <Diamond className="w-5 h-5" />;
+                    case '♣': return <Club className="w-5 h-5" />;
+                    default: return null;
+                }
+            };
+
+            const getSuitColor = (suit) => {
+                return (suit === '♥' || suit === '♦') ? 'text-red-600' : 'text-gray-900';
+            };
+
+            const createDeck = () => {
+                const newDeck = [];
+                for (let suit of suits) {
+                    for (let rank of ranks) {
+                        newDeck.push({ suit, rank });
+                    }
+                }
+                return shuffleDeck(newDeck);
+            };
+
+            const shuffleDeck = (deck) => {
+                const shuffled = [...deck];
+                for (let i = shuffled.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                }
+                return shuffled;
+            };
+
+            const evaluateHand = (hand, community) => {
+                const allCards = [...hand, ...community];
+                if (allCards.length < 5) return { rank: 0, name: 'Incomplete Hand' };
+
+                const rankValues = { '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14 };
+                const cards = allCards.map(c => ({ ...c, value: rankValues[c.rank] })).sort((a, b) => b.value - a.value);
+
+                const rankCounts = {};
+                const suitCounts = {};
+                cards.forEach(card => {
+                    rankCounts[card.value] = (rankCounts[card.value] || 0) + 1;
+                    suitCounts[card.suit] = (suitCounts[card.suit] || 0) + 1;
+                });
+
+                const counts = Object.values(rankCounts).sort((a, b) => b - a);
+                const isFlush = Object.values(suitCounts).some(count => count >= 5);
+                
+                const values = cards.map(c => c.value);
+                let isStraight = false;
+                for (let i = 0; i <= values.length - 5; i++) {
+                    if (values[i] - values[i + 4] === 4) {
+                        isStraight = true;
+                        break;
+                    }
+                }
+                if (values.includes(14) && values.includes(2) && values.includes(3) && values.includes(4) && values.includes(5)) {
+                    isStraight = true;
+                }
+
+                if (isStraight && isFlush) return { rank: 8, name: 'Straight Flush', cards };
+                if (counts[0] === 4) return { rank: 7, name: 'Four of a Kind', cards };
+                if (counts[0] === 3 && counts[1] >= 2) return { rank: 6, name: 'Full House', cards };
+                if (isFlush) return { rank: 5, name: 'Flush', cards };
+                if (isStraight) return { rank: 4, name: 'Straight', cards };
+                if (counts[0] === 3) return { rank: 3, name: 'Three of a Kind', cards };
+                if (counts[0] === 2 && counts[1] === 2) return { rank: 2, name: 'Two Pair', cards };
+                if (counts[0] === 2) return { rank: 1, name: 'Pair', cards };
+                return { rank: 0, name: 'High Card', cards };
+            };
+
+            const startNewHand = () => {
+                setIsAnimating(true);
+                setWinner(null);
+                setHandResult(null);
+                const newDeck = createDeck();
+                
+                const newPlayerHand = [newDeck[0], newDeck[1]];
+                const newOpponentHands = [
+                    [newDeck[2], newDeck[3]],
+                    [newDeck[4], newDeck[5]],
+                    [newDeck[6], newDeck[7]]
+                ];
+                
+                setPlayerHand(newPlayerHand);
+                setOpponentHands(newOpponentHands);
+                setCommunityCards([]);
+                setDeck(newDeck.slice(8));
+                setGamePhase('preflop');
+                setCurrentBet(20);
+                setPlayerBet(0);
+                setPot(60);
+                
+                setTimeout(() => setIsAnimating(false), 600);
+            };
+
+            const dealFlop = () => {
+                setIsAnimating(true);
+                const newCommunity = [deck[0], deck[1], deck[2]];
+                setCommunityCards(newCommunity);
+                setDeck(deck.slice(3));
+                setGamePhase('flop');
+                setTimeout(() => setIsAnimating(false), 600);
+            };
+
+            const dealTurn = () => {
+                setIsAnimating(true);
+                const newCommunity = [...communityCards, deck[0]];
+                setCommunityCards(newCommunity);
+                setDeck(deck.slice(1));
+                setGamePhase('turn');
+                setTimeout(() => setIsAnimating(false), 400);
+            };
+
+            const dealRiver = () => {
+                setIsAnimating(true);
+                const newCommunity = [...communityCards, deck[0]];
+                setCommunityCards(newCommunity);
+                setDeck(deck.slice(1));
+                setGamePhase('river');
+                setTimeout(() => setIsAnimating(false), 400);
+            };
+
+            const showdown = () => {
+                const playerResult = evaluateHand(playerHand, communityCards);
+                const opponentResults = opponentHands.map(hand => evaluateHand(hand, communityCards));
+                
+                const allResults = [
+                    { player: 'You', result: playerResult, hand: playerHand },
+                    { player: 'Opponent 1', result: opponentResults[0], hand: opponentHands[0] },
+                    { player: 'Opponent 2', result: opponentResults[1], hand: opponentHands[1] },
+                    { player: 'Opponent 3', result: opponentResults[2], hand: opponentHands[2] }
+                ];
+
+                allResults.sort((a, b) => {
+                    if (b.result.rank !== a.result.rank) return b.result.rank - a.result.rank;
+                    return b.result.cards[0].value - a.result.cards[0].value;
+                });
+
+                setWinner(allResults[0].player);
+                setHandResult(allResults);
+                setGamePhase('showdown');
+                
+                if (allResults[0].player === 'You') {
+                    setPlayerChips(prev => prev + pot);
+                }
+            };
+
+            const handleBet = (amount) => {
+                if (playerChips >= amount) {
+                    setPlayerChips(prev => prev - amount);
+                    setPlayerBet(prev => prev + amount);
+                    setPot(prev => prev + amount);
+                    setCurrentBet(amount);
+                }
+            };
+
+            useEffect(() => {
+                startNewHand();
+            }, []);
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-emerald-900 via-emerald-800 to-teal-900 p-8 font-sans">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-8">
+                            <h1 className="text-5xl font-black text-white mb-2 tracking-tight">Texas Hold'em</h1>
+                            <p className="text-emerald-200 text-lg">Multiplayer Poker Simulator</p>
+                        </div>
+
+                        <div className="bg-emerald-800/40 backdrop-blur-sm rounded-3xl p-8 border-4 border-emerald-700/50 shadow-2xl felt-texture">
+                            
+                            {/* Opponents */}
+                            <div className="grid grid-cols-3 gap-4 mb-8">
+                                {opponentHands.map((hand, idx) => (
+                                    <div key={idx} className="bg-emerald-900/60 rounded-xl p-4 border-2 border-emerald-600/40">
+                                        <div className="text-emerald-200 text-sm font-semibold mb-2">Opponent {idx + 1}</div>
+                                        <div className="flex gap-2 justify-center mb-2">
+                                            {gamePhase === 'showdown' ? (
+                                                hand.map((card, i) => (
+                                                    <div key={i} className="bg-white rounded-lg p-3 shadow-lg w-16 h-22 flex flex-col items-center justify-center border-2 border-gray-300">
+                                                        <div className={`text-2xl font-bold ${getSuitColor(card.suit)}`}>{card.rank}</div>
+                                                        <div className={getSuitColor(card.suit)}>{getSuitIcon(card.suit)}</div>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <>
+                                                    <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg w-16 h-22 shadow-lg border-2 border-blue-900"></div>
+                                                    <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg w-16 h-22 shadow-lg border-2 border-blue-900"></div>
+                                                </>
+                                            )}
+                                        </div>
+                                        <div className="text-emerald-300 text-sm flex items-center justify-center gap-2">
+                                            <div className="w-3 h-3 rounded-full bg-yellow-500 chip-stack"></div>
+                                            ${opponentChips[idx]}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Community Cards */}
+                            <div className="mb-8">
+                                <div className="text-center mb-4">
+                                    <div className="inline-block bg-emerald-900/80 rounded-full px-6 py-2 border-2 border-emerald-500/50">
+                                        <span className="text-white font-bold text-xl">Pot: ${pot}</span>
+                                    </div>
+                                </div>
+                                <div className="flex gap-3 justify-center min-h-32 items-center">
+                                    {communityCards.map((card, idx) => (
+                                        <div key={idx} className={`bg-white rounded-xl p-4 shadow-2xl w-20 h-28 flex flex-col items-center justify-center border-2 border-gray-300 ${isAnimating ? 'card-enter' : ''}`} style={{ animationDelay: `${idx * 0.1}s` }}>
+                                            <div className={`text-3xl font-bold ${getSuitColor(card.suit)}`}>{card.rank}</div>
+                                            <div className={getSuitColor(card.suit)}>{getSuitIcon(card.suit)}</div>
+                                        </div>
+                                    ))}
+                                    {communityCards.length === 0 && (
+                                        <div className="text-emerald-300/50 text-lg font-semibold">Community Cards</div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Player Hand */}
+                            <div className="bg-gradient-to-br from-amber-600/30 to-amber-800/30 rounded-2xl p-6 border-2 border-amber-500/40 backdrop-blur-sm">
+                                <div className="text-amber-200 text-sm font-semibold mb-3 flex justify-between items-center">
+                                    <span>Your Hand</span>
+                                    <span className="flex items-center gap-2">
+                                        <div className="w-3 h-3 rounded-full bg-yellow-400 chip-stack"></div>
+                                        ${playerChips}
+                                    </span>
+                                </div>
+                                <div className="flex gap-4 justify-center mb-4">
+                                    {playerHand.map((card, idx) => (
+                                        <div key={idx} className={`bg-white rounded-xl p-5 shadow-2xl w-24 h-32 flex flex-col items-center justify-center border-4 border-amber-400 ${isAnimating ? 'card-enter' : ''}`}>
+                                            <div className={`text-4xl font-bold ${getSuitColor(card.suit)}`}>{card.rank}</div>
+                                            <div className={getSuitColor(card.suit)}>{getSuitIcon(card.suit)}</div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {handResult && (
+                                    <div className="bg-emerald-900/80 rounded-xl p-4 mb-4 border-2 border-emerald-500">
+                                        <div className="text-white font-bold text-lg mb-2">🏆 Winner: {winner}</div>
+                                        {handResult.map((result, idx) => (
+                                            <div key={idx} className={`text-sm py-1 ${result.player === winner ? 'text-yellow-300 font-bold' : 'text-emerald-200'}`}>
+                                                {result.player}: {result.result.name}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Action Buttons */}
+                                <div className="flex gap-3 justify-center flex-wrap">
+                                    {gamePhase === 'preflop' && (
+                                        <>
+                                            <button onClick={dealFlop} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all transform hover:scale-105">
+                                                Deal Flop
+                                            </button>
+                                            <button onClick={() => handleBet(50)} className="bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all transform hover:scale-105">
+                                                Bet $50
+                                            </button>
+                                        </>
+                                    )}
+                                    {gamePhase === 'flop' && (
+                                        <>
+                                            <button onClick={dealTurn} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all transform hover:scale-105">
+                                                Deal Turn
+                                            </button>
+                                            <button onClick={() => handleBet(100)} className="bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all transform hover:scale-105">
+                                                Bet $100
+                                            </button>
+                                        </>
+                                    )}
+                                    {gamePhase === 'turn' && (
+                                        <>
+                                            <button onClick={dealRiver} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all transform hover:scale-105">
+                                                Deal River
+                                            </button>
+                                            <button onClick={() => handleBet(150)} className="bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all transform hover:scale-105">
+                                                Bet $150
+                                            </button>
+                                        </>
+                                    )}
+                                    {gamePhase === 'river' && (
+                                        <button onClick={showdown} className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all transform hover:scale-105">
+                                            Showdown
+                                        </button>
+                                    )}
+                                    {gamePhase === 'showdown' && (
+                                        <button onClick={startNewHand} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all transform hover:scale-105">
+                                            New Hand
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Game Info */}
+                            <div className="mt-6 text-center">
+                                <div className="inline-block bg-emerald-900/60 rounded-full px-6 py-2 border border-emerald-600/40">
+                                    <span className="text-emerald-200 text-sm font-semibold">
+                                        Phase: <span className="text-white font-bold uppercase">{gamePhase}</span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Technical Info Footer */}
+                        <div className="mt-8 text-center text-emerald-300/70 text-sm">
+                            <p>Built with React • Real-time hand evaluation • Multiplayer simulation</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<PokerGame />);
+    </script>
+</body>
+</html>
